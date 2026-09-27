@@ -2,7 +2,7 @@
 
 Each dataset module provides:
     RAW_DIRNAME                                  folder name under data/raw/
-    prepare(raw_dir, out_dir, seed, val_frac)    raw -> processed (see common.py for the output format)
+    prepare(raw_dir, out_dir, val_frac)          raw -> processed (see common.py for the output format)
 
 To add a dataset: write a module next to this one and add a line to REGISTRY.
 """

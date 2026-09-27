@@ -76,7 +76,7 @@ def load_split(csv_dir: Path) -> pd.DataFrame:
     return df
 
 
-def prepare(raw_dir: Path, out_dir: Path, seed: int, val_frac: float) -> None:
+def prepare(raw_dir: Path, out_dir: Path, val_frac: float) -> None:
     print(f"Loading train CSVs from {raw_dir / 'csv/train'}")
     train = load_split(raw_dir / "csv" / "train")
     print(f"Loading test CSVs from {raw_dir / 'csv/test'}")
@@ -93,12 +93,11 @@ def prepare(raw_dir: Path, out_dir: Path, seed: int, val_frac: float) -> None:
     train, train_dups = common.drop_duplicates(train, features)
     test_rows_also_in_train = common.count_overlap(test, train, features)
 
-    train, val = common.split_val(train, val_frac, seed, stratify="attack")
+    train, val = common.split_val(train, val_frac)
 
     info = {
         "dataset": "CICIoMT2024 (WiFi_and_MQTT attacks, CSV features)",
         "source": "https://www.unb.ca/cic/datasets/iomt-dataset-2024.html",
-        "seed": seed,
         "val_frac": val_frac,
         "cleaning": {
             "train": {**train_clean, **train_dups},

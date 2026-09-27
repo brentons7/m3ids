@@ -38,5 +38,9 @@ class Detector:
         """One anomaly score per row; higher = more likely an attack."""
         raise NotImplementedError
 
+    def n_params(self) -> int | None:
+        """Optional: number of trainable weights, reported so model sizes can be compared."""
+        return None
+
     def save(self, path: Path) -> None:
         """Optional: write the trained model into the run's results folder."""

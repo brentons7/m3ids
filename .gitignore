@@ -12,3 +12,6 @@ venv/
 # AMD/ROCm Mamba-3 fix, kept local
 patches/
 scripts/check_mamba3.py
+
+# Personal notes and journal, kept local
+docs/

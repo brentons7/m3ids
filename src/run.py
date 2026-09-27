@@ -66,7 +66,6 @@ def cmd_prepare(args, extra) -> None:
     module.prepare(
         raw_dir=RAW_DIR / module.RAW_DIRNAME,
         out_dir=PROCESSED_DIR / args.dataset,
-        seed=args.seed,
         val_frac=args.val_frac,
     )
 
@@ -89,8 +88,7 @@ def main() -> None:
 
     p = sub.add_parser("prepare", help="turn data/raw/<dataset> into data/processed/<dataset>")
     p.add_argument("--dataset", required=True, choices=datasets.REGISTRY)
-    p.add_argument("--seed", type=int, default=42, help="seed for the train/val split")
-    p.add_argument("--val-frac", type=float, default=0.1, help="share of train held out as validation")
+    p.add_argument("--val-frac", type=float, default=0.1, help="share of each training capture (its last rows in time) held out as validation")
     p.set_defaults(func=cmd_prepare)
 
     e = sub.add_parser("experiment", help="train + evaluate one model on one dataset; extra --flags set hyperparameters")

@@ -1,10 +1,10 @@
 import torch.nn as nn
-from mamba_ssm.modules.mamba3 import Mamba3
+from mamba_ssm.modules.mamba2 import Mamba2
 
 from .sequence import ResidualStack, SequenceDetector
 
 
-class Mamba3Detector(SequenceDetector):
+class Mamba2Detector(SequenceDetector):
     default_hparams = {
         **SequenceDetector.default_hparams,
         "d_state": 64,
@@ -15,7 +15,10 @@ class Mamba3Detector(SequenceDetector):
     def build_backbone(self) -> nn.Module:
         hp = self.hp
         mixers = [
-            Mamba3(d_model=hp["d_model"], d_state=hp["d_state"], headdim=hp["headdim"], expand=hp["expand"], layer_idx=i)
+            # use_mem_eff_path=False: the fused path needs the causal-conv1d package, which isn't
+            # installed here. Same math, just a little more memory.
+            Mamba2(d_model=hp["d_model"], d_state=hp["d_state"], headdim=hp["headdim"], expand=hp["expand"],
+                   layer_idx=i, use_mem_eff_path=False)
             for i in range(hp["n_layers"])
         ]
         return ResidualStack(mixers, hp["d_model"], hp["dropout"])

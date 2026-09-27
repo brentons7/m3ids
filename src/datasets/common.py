@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
 
 # Columns that describe a row but are never fed to a model as features.
 #   label        0 = benign, 1 = attack (the anomaly-detection target)
@@ -66,10 +65,17 @@ def count_overlap(df: pd.DataFrame, reference: pd.DataFrame, features: list[str]
     return int(row_hashes(df, features).isin(set(row_hashes(reference, features))).sum())
 
 
-def split_val(df: pd.DataFrame, val_frac: float, seed: int, stratify: str) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Carve a validation set out of train, keeping each class's share the same in both."""
-    train, val = train_test_split(df, test_size=val_frac, stratify=df[stratify], random_state=seed)
-    return train.reset_index(drop=True), val.reset_index(drop=True)
+def split_val(df: pd.DataFrame, val_frac: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Carve a validation set out of train: the last val_frac (in time) of every capture file.
+
+    Not random rows: sequence models see a window of neighbouring rows, so a randomly picked
+    val row's window would be nearly identical to its train neighbours' windows, making val
+    look far easier than truly unseen traffic. Taking the tail of each capture keeps val
+    windows separate from train while every traffic type still appears in val.
+    """
+    frac_in_file = df.groupby("source_file", observed=True)["row_in_file"].rank(pct=True, method="first")
+    is_val = frac_in_file > 1 - val_frac
+    return df[~is_val].reset_index(drop=True), df[is_val].reset_index(drop=True)
 
 
 def class_counts(splits: dict[str, pd.DataFrame], col: str) -> pd.DataFrame:

@@ -66,6 +66,7 @@ def run_experiment(
     infer_us_per_row = (time.time() - t0) / len(test_scores) * 1e6
 
     metrics = evaluate.evaluate(val_scores, splits["val"].y, test_scores, splits["test"].y, splits["test"].attack)
+    metrics["n_params"] = model.n_params()
     metrics["train_seconds"] = round(train_seconds, 1)
     metrics["infer_us_per_row"] = round(infer_us_per_row, 3)
 
@@ -83,6 +84,8 @@ def run_experiment(
     print(f"\nResults saved to {run_dir}")
     for k in ["roc_auc", "pr_auc", "f1", "precision", "recall", "fpr", "balanced_accuracy", "train_seconds", "infer_us_per_row"]:
         print(f"  {k:18s} {metrics[k]:.4f}")
+    if metrics["n_params"] is not None:
+        print(f"  {'n_params':18s} {metrics['n_params']:,}")
     print("  flagged as attack, per class:")
     for a, rate in metrics["flagged_rate_per_class"].items():
         print(f"    {a:26s} {rate:.4f}")
@@ -90,12 +93,21 @@ def run_experiment(
 
 
 SUMMARY_COLUMNS = ["run_id", "dataset", "model", "seed", "tag", "roc_auc", "pr_auc", "f1", "precision",
-                   "recall", "fpr", "balanced_accuracy", "train_seconds", "infer_us_per_row", "hparams"]
+                   "recall", "fpr", "balanced_accuracy", "n_params", "train_seconds", "infer_us_per_row", "hparams"]
 
 
 def append_summary(path: Path, run_id: str, config: dict, metrics: dict) -> None:
     """One row per run in results/summary.csv, for comparing models at a glance."""
     row = {"run_id": run_id, **config, **metrics, "hparams": json.dumps(config["hparams"])}
+    if path.exists():
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            old_rows = list(reader)
+        if reader.fieldnames != SUMMARY_COLUMNS:  # columns changed since the file was written
+            with path.open("w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=SUMMARY_COLUMNS, extrasaction="ignore")
+                writer.writeheader()
+                writer.writerows(old_rows)
     new = not path.exists()
     with path.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=SUMMARY_COLUMNS, extrasaction="ignore")
