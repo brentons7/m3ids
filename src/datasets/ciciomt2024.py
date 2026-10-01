@@ -1,18 +1,6 @@
-"""CICIoMT2024 (Canadian Institute for Cybersecurity, UNB): Wi-Fi + MQTT attack traffic.
+"""CICIoMT2024 (https://www.unb.ca/cic/datasets/iomt-dataset-2024.html), WiFi_and_MQTT attacks.
 
-Download it from https://www.unb.ca/cic/datasets/iomt-dataset-2024.html and extract the
-WiFi_and_MQTT/attacks/csv folder so the layout is:
-
-    data/raw/CICIoMT2024/csv/train/*.csv
-    data/raw/CICIoMT2024/csv/test/*.csv
-
-Each CSV holds one traffic type, and each row summarizes a small window of packets
-(45 numeric features). There is no label column: the filename is the label, e.g.
-    TCP_IP-DDoS-SYN3_train.pcap.csv  ->  attack "DDoS-SYN", category "DDoS"
-where "3" is just the capture chunk number.
-
-We keep the authors' train/test split so results are comparable with published work,
-and carve our validation set out of train.
+Expects data/raw/CICIoMT2024/csv/{train,test}/*.csv. Labels come from filenames; the published train/test split is kept.
 """
 import re
 from pathlib import Path
@@ -88,8 +76,7 @@ def prepare(raw_dir: Path, out_dir: Path, val_frac: float) -> None:
     train, train_clean = common.clean(train, features)
     test, test_clean = common.clean(test, features)
 
-    # Duplicates are removed from train only. The test set stays exactly as published,
-    # so our numbers stay comparable to other papers; the overlap count goes in meta.json.
+    # Dedupe train only; test stays as published so results compare with other papers.
     train, train_dups = common.drop_duplicates(train, features)
     test_rows_also_in_train = common.count_overlap(test, train, features)
 

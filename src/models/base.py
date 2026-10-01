@@ -1,9 +1,4 @@
-"""The blueprint every model follows: supervised flag, default hyperparameters, fit(), score().
-
-experiment.py only talks to models through this interface, so any model can be swapped in
-with --model. Hyperparameters listed in default_hparams automatically become CLI flags:
-    default_hparams = {"hidden_dim": 64}   ->   --hidden-dim 128
-"""
+"""Interface every model follows. Keys in default_hparams become CLI flags."""
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,8 +16,7 @@ class Split:
 
 
 class Detector:
-    # True: trains on benign + attack rows with labels.
-    # False: trains on benign rows only and flags whatever looks unlike them.
+    # False: trains on benign rows only.
     supervised: bool = True
     default_hparams: dict = {}
 

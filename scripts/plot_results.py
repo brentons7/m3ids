@@ -1,12 +1,4 @@
-"""Compare models across seeds for one batch of runs (selected by --tag).
-
-    python scripts/plot_results.py --tag valfix
-
-Writes to results/figures/<tag>/:
-    summary_table.csv     mean and std per model, over seeds
-    metrics_by_model.png  false alarms / missed attacks / balanced accuracy, one dot per seed
-    errors_by_class.png   per traffic type: % of attacks missed, or % of benign falsely flagged
-"""
+"""Plot one tag's runs to results/figures/<tag>/: python3 scripts/plot_results.py --tag TAG"""
 import argparse
 import json
 from pathlib import Path
@@ -19,9 +11,10 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL_ORDER = ["mamba3", "mamba2", "lstm", "transformer"]
-MODEL_NAMES = {"mamba3": "Mamba-3", "mamba2": "Mamba-2", "lstm": "LSTM", "transformer": "Transformer"}
-COLORS = {"mamba3": "#2a78d6", "mamba2": "#eb6834", "lstm": "#1baf7a", "transformer": "#eda100"}
+MODEL_ORDER = ["mamba3", "mamba2", "transformer"]
+MODEL_NAMES = {"mamba3": "Mamba-3", "mamba2": "Mamba-2", "transformer": "Transformer"}
+COLORS = {"mamba3": "#2a78d6", "mamba2": "#eb6834", "transformer": "#eda100"}
+DATASET_NAMES = {"ciciomt2024": "CICIoMT2024", "iomtind2026": "IoMT-IND2026"}
 INK, INK_2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 BLUES = ["#fcfcfb", "#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
 
@@ -37,10 +30,12 @@ def load_runs(tag: str) -> pd.DataFrame:
     for run_dir in sorted((ROOT / "results").glob(f"*_{tag}")):
         config = json.loads((run_dir / "config.json").read_text())
         metrics = json.loads((run_dir / "metrics.json").read_text())
-        rows.append({"model": config["model"], "seed": config["seed"], **metrics})
+        rows.append({"model": config["model"], "seed": config["seed"], "dataset": config["dataset"], **metrics})
     if not rows:
         raise SystemExit(f"No runs tagged {tag!r} in results/")
     df = pd.DataFrame(rows)
+    if df["dataset"].nunique() > 1:
+        raise SystemExit(f"Runs tagged {tag!r} span several datasets {sorted(df['dataset'].unique())}; use a distinct tag per dataset")
     df["miss_rate"] = 1 - df["recall"]
     return df
 
@@ -79,7 +74,7 @@ def plot_metrics(df: pd.DataFrame, out: Path) -> None:
     axes[0].set_yticks(range(len(models)), [MODEL_NAMES[m] for m in models])
     axes[0].set_ylim(len(models) - 0.5, -0.5)
     n_seeds = df.groupby("model").size().min()
-    fig.suptitle(f"CICIoMT2024 test set: dots = individual seeds ({n_seeds} per model), black bar = mean",
+    fig.suptitle(f"{DATASET_NAMES.get(df['dataset'].iloc[0], df['dataset'].iloc[0])} test set: dots = individual seeds ({n_seeds} per model), black bar = mean",
                  x=0.01, ha="left", fontsize=10, color=INK_2)
     fig.tight_layout()
     fig.savefig(out, dpi=160)
@@ -87,11 +82,7 @@ def plot_metrics(df: pd.DataFrame, out: Path) -> None:
 
 
 def plot_errors_by_class(df: pd.DataFrame, out: Path) -> None:
-    """Heatmap: rows = traffic types, cols = models. Cell = error rate (mean over seeds).
-
-    For attacks the error is 'missed' (1 - flagged); for Benign it's 'falsely flagged'.
-    Same direction either way: darker = worse.
-    """
+    """Heatmap of error rate per traffic type and model (missed for attacks, falsely flagged for Benign)."""
     models = [m for m in MODEL_ORDER if m in set(df["model"])]
     flagged = pd.DataFrame([{"model": r["model"], **r["flagged_rate_per_class"]} for _, r in df.iterrows()])
     flagged = flagged.groupby("model").mean().T[models]
@@ -120,7 +111,7 @@ def plot_errors_by_class(df: pd.DataFrame, out: Path) -> None:
     for s in ax.spines.values():
         s.set_visible(False)
     fig.suptitle("Error rate by traffic type (%)", x=0.02, ha="left", fontweight="bold", fontsize=11)
-    fig.text(0.02, 1 - 0.55 / fig.get_figheight(), "Mean over seeds, CICIoMT2024 test set. Darker = worse.",
+    fig.text(0.02, 1 - 0.55 / fig.get_figheight(), f"Mean over seeds, {DATASET_NAMES.get(df['dataset'].iloc[0], df['dataset'].iloc[0])} test set. Darker = worse.",
              ha="left", color=INK_2, fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 1 - 0.75 / fig.get_figheight()))
     fig.savefig(out, dpi=160)

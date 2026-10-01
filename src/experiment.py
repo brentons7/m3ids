@@ -77,6 +77,7 @@ def run_experiment(
     config = {"dataset": dataset, "model": model_name, "seed": seed, "device": device, "tag": tag, "hparams": model.hp}
     (run_dir / "config.json").write_text(json.dumps(config, indent=2))
     (run_dir / "metrics.json").write_text(json.dumps(metrics, indent=2))
+    np.save(run_dir / "val_scores.npy", val_scores)
     np.save(run_dir / "test_scores.npy", test_scores)
     model.save(run_dir)
     append_summary(results_dir / "summary.csv", run_id, config, metrics)

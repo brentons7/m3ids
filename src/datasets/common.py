@@ -1,12 +1,4 @@
-"""Shared preprocessing helpers: cleaning features, the train/val split, and saving processed data.
-
-Every dataset module produces the same processed format, so the rest of the pipeline
-never needs to know which dataset it's looking at:
-
-    data/processed/<dataset>/
-        train.parquet, val.parquet, test.parquet   feature columns + META_COLUMNS
-        meta.json                                  feature list, class counts, cleaning stats
-"""
+"""Preprocessing shared by all datasets. Output: data/processed/<dataset>/{train,val,test}.parquet + meta.json."""
 import json
 from datetime import datetime
 from pathlib import Path
@@ -14,12 +6,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# Columns that describe a row but are never fed to a model as features.
-#   label        0 = benign, 1 = attack (the anomaly-detection target)
-#   category     coarse attack family, e.g. "DDoS"
-#   attack       specific attack, e.g. "DDoS-SYN"
-#   source_file  raw file the row came from
-#   row_in_file  original row position, kept so time order can be rebuilt for sequence models
+# Non-feature columns. label: 0 = benign, 1 = attack; row_in_file keeps time order.
 META_COLUMNS = ["label", "category", "attack", "source_file", "row_in_file"]
 
 
@@ -37,12 +24,7 @@ def row_hashes(df: pd.DataFrame, cols: list[str]) -> pd.Series:
 
 
 def drop_duplicates(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, dict]:
-    """Drop rows whose features AND attack label repeat an earlier row.
-
-    Also counts "conflicting" duplicates: identical features but different labels.
-    No model can get those right, so a high count means the features can't fully separate
-    the classes.
-    """
+    """Drop repeated (features, attack) rows; also count identical features with conflicting labels."""
     feat_hash = row_hashes(df, features)
     full_hash = row_hashes(df, features + ["attack"])
     dup = full_hash.duplicated()
@@ -57,22 +39,12 @@ def drop_duplicates(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame
 
 
 def count_overlap(df: pd.DataFrame, reference: pd.DataFrame, features: list[str]) -> int:
-    """How many rows of df have a feature vector that also appears in reference.
-
-    Rows shared between train and test let a model score well by memorizing, so this is
-    worth reporting even when we don't remove them.
-    """
+    """How many rows of df have a feature vector that also appears in reference."""
     return int(row_hashes(df, features).isin(set(row_hashes(reference, features))).sum())
 
 
 def split_val(df: pd.DataFrame, val_frac: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Carve a validation set out of train: the last val_frac (in time) of every capture file.
-
-    Not random rows: sequence models see a window of neighbouring rows, so a randomly picked
-    val row's window would be nearly identical to its train neighbours' windows, making val
-    look far easier than truly unseen traffic. Taking the tail of each capture keeps val
-    windows separate from train while every traffic type still appears in val.
-    """
+    """Val = the last val_frac (in time) of each capture, so val windows don't overlap train windows."""
     frac_in_file = df.groupby("source_file", observed=True)["row_in_file"].rank(pct=True, method="first")
     is_val = frac_in_file > 1 - val_frac
     return df[~is_val].reset_index(drop=True), df[is_val].reset_index(drop=True)

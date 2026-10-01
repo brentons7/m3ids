@@ -15,8 +15,7 @@ class Mamba2Detector(SequenceDetector):
     def build_backbone(self) -> nn.Module:
         hp = self.hp
         mixers = [
-            # use_mem_eff_path=False: the fused path needs the causal-conv1d package, which isn't
-            # installed here. Same math, just a little more memory.
+            # use_mem_eff_path=False: fused path needs causal-conv1d.
             Mamba2(d_model=hp["d_model"], d_state=hp["d_state"], headdim=hp["headdim"], expand=hp["expand"],
                    layer_idx=i, use_mem_eff_path=False)
             for i in range(hp["n_layers"])

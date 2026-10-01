@@ -5,8 +5,7 @@ from .sequence import SequenceDetector
 
 
 class CausalTransformer(nn.Module):
-    """Learned position embedding + pre-norm Transformer encoder layers with a causal mask,
-    so each row only attends to itself and earlier rows, like the recurrent models."""
+    """Pre-norm Transformer encoder with learned positions and a causal mask."""
 
     def __init__(self, seq_len, d_model, n_layers, n_heads, ff_mult, dropout):
         super().__init__()

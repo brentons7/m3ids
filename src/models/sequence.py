@@ -1,14 +1,4 @@
-"""Shared machinery for every sequence model (Mamba-3, Mamba-2, LSTM, Transformer).
-
-Each model file only says how to build its backbone. Everything else lives here and is
-identical across models, so differences in results come from the backbone alone:
-
-    window of rows -> linear embedding -> backbone -> norm -> last step -> logit
-
-    Windows            turns a split's rows into (batch, seq_len, n_features) windows
-    ResidualStack      n_layers x (RMSNorm -> mixer -> dropout -> residual), for Mamba and LSTM
-    SequenceDetector   training loop, scoring, saving; subclasses implement build_backbone()
-"""
+"""Shared windowing, training and scoring; each model only implements build_backbone()."""
 from pathlib import Path
 
 import numpy as np
@@ -73,8 +63,6 @@ class SequenceClassifier(nn.Module):
 
 class SequenceDetector(Detector):
     supervised = True
-    # Shared by every sequence model; subclasses add their own backbone settings on top:
-    #     default_hparams = {**SequenceDetector.default_hparams, "d_state": 64}
     default_hparams = {
         "seq_len": 32,       # rows of history per prediction
         "d_model": 64,
@@ -85,6 +73,7 @@ class SequenceDetector(Detector):
         "lr": 1e-3,
         "weight_decay": 0.01,
         "train_frac": 1.0,   # fraction of training rows sampled per epoch (lower = faster epochs)
+        "benign_weight": 1.0,  # how much a mistake on a benign row counts vs. an attack row (1 = equal)
     }
 
     def build_backbone(self) -> nn.Module:
@@ -114,7 +103,9 @@ class SequenceDetector(Detector):
                 x, y = windows.batch(perm[i : i + hp["batch_size"]])
                 with torch.autocast(**self.autocast):
                     logits = self.net(x)
-                loss = F.binary_cross_entropy_with_logits(logits.float(), y)
+                # Benign rows weighted by benign_weight; normalized so loss scale doesn't change.
+                w = torch.where(y == 0, hp["benign_weight"], 1.0)
+                loss = (F.binary_cross_entropy_with_logits(logits.float(), y, reduction="none") * w).sum() / w.sum()
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.net.parameters(), 1.0)

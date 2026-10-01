@@ -1,28 +1,17 @@
-"""Single entry point. Run from the repo root:
-
-    python -m src.run list                                             models + their hyperparameters
-    python -m src.run prepare --dataset ciciomt2024                    raw -> processed
-    python -m src.run experiment --dataset ciciomt2024 --model mamba3  train + evaluate
-
-Any extra --flag on `experiment` sets a model hyperparameter, e.g. --epochs 5 --seq-len 64.
-"""
+"""Entry point: python3 run.py {list,prepare,experiment}. Extra --flags on experiment set hyperparameters."""
 import argparse
 from pathlib import Path
 
 from src import datasets, models
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parent
 RAW_DIR = ROOT / "data" / "raw"
 PROCESSED_DIR = ROOT / "data" / "processed"
 RESULTS_DIR = ROOT / "results"
 
 
 def parse_hparams(extra: list[str], defaults: dict) -> dict:
-    """Turn leftover CLI args like ["--seq-len", "64", "--lr=3e-4"] into {"seq_len": 64, "lr": 0.0003}.
-
-    Values are converted to the type of the model's default, and unknown names are an
-    error so a typo can't silently fall back to the default.
-    """
+    """["--seq-len", "64"] -> {"seq_len": 64}, typed like the defaults; unknown names are an error."""
     hparams, i = {}, 0
     while i < len(extra):
         if not extra[i].startswith("--"):
@@ -81,7 +70,7 @@ def cmd_experiment(args, extra) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="python -m src.run")
+    parser = argparse.ArgumentParser(prog="python3 run.py")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("list", help="show datasets, models and their hyperparameters").set_defaults(func=cmd_list)

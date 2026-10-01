@@ -1,12 +1,4 @@
-"""Metrics: pick the detection threshold on val, then report on test.
-
-The threshold turns scores into benign/attack decisions. Choosing it on val (never on
-test) keeps the test numbers honest.
-
-Attack is the positive class. Because attacks are ~96% of CICIoMT2024, attack-focused
-metrics (precision, recall, PR-AUC) look high almost automatically, so we also report
-fpr (share of benign traffic wrongly flagged) and balanced accuracy.
-"""
+"""Pick the threshold on val, report metrics on test (attack = positive class)."""
 import numpy as np
 from sklearn.metrics import average_precision_score, confusion_matrix, precision_recall_curve, roc_auc_score
 

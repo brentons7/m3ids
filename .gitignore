@@ -2,6 +2,10 @@ data/raw/*
 data/processed/*
 results/*
 !.gitkeep
+# Figures are the one part of results/ that goes in git: PNGs only, no CSVs or run data
+!results/figures/
+results/figures/*/*
+!results/figures/*/*.png
 
 __pycache__/
 *.pyc
