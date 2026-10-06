@@ -12,9 +12,12 @@ META_COLUMNS = ["label", "category", "attack", "source_file", "row_in_file"]
 
 def clean(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, dict]:
     """Drop rows with NaN or +/-inf in any feature column."""
-    values = df[features].to_numpy()
-    bad = ~np.isfinite(values).all(axis=1)
+    bad = np.zeros(len(df), dtype=bool)
+    for col in features:  # column by column, so a multi-GB table is never copied whole
+        bad |= ~np.isfinite(df[col].to_numpy())
     stats = {"rows_dropped_nan_or_inf": int(bad.sum())}
+    if not bad.any():
+        return df, stats
     return df[~bad].reset_index(drop=True), stats
 
 
@@ -23,8 +26,12 @@ def row_hashes(df: pd.DataFrame, cols: list[str]) -> pd.Series:
     return pd.util.hash_pandas_object(df[cols], index=False)
 
 
-def drop_duplicates(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame, dict]:
-    """Drop repeated (features, attack) rows; also count identical features with conflicting labels."""
+def drop_duplicates(df: pd.DataFrame, features: list[str], drop: bool = True) -> tuple[pd.DataFrame, dict]:
+    """Drop repeated (features, attack) rows; also count identical features with conflicting labels.
+
+    drop=False only counts them: in packet- or flow-level data, floods are runs of identical rows, and
+    removing them would delete most of an attack and break the time order the sequence models read.
+    """
     feat_hash = row_hashes(df, features)
     full_hash = row_hashes(df, features + ["attack"])
     dup = full_hash.duplicated()
@@ -32,9 +39,11 @@ def drop_duplicates(df: pd.DataFrame, features: list[str]) -> tuple[pd.DataFrame
         pd.DataFrame({"h": feat_hash, "label": df["label"]}).groupby("h")["label"].nunique() > 1
     ).sum()
     stats = {
-        "duplicate_rows_dropped": int(dup.sum()),
+        "duplicate_rows_dropped" if drop else "duplicate_rows_kept": int(dup.sum()),
         "feature_vectors_with_conflicting_labels": int(conflicting),
     }
+    if not drop:
+        return df, stats
     return df[~dup].reset_index(drop=True), stats
 
 
@@ -48,6 +57,13 @@ def split_val(df: pd.DataFrame, val_frac: float) -> tuple[pd.DataFrame, pd.DataF
     frac_in_file = df.groupby("source_file", observed=True)["row_in_file"].rank(pct=True, method="first")
     is_val = frac_in_file > 1 - val_frac
     return df[~is_val].reset_index(drop=True), df[is_val].reset_index(drop=True)
+
+
+def split_head(df: pd.DataFrame, frac: float) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(first frac in time of each capture, the rest). Used to carve val out of the test recordings."""
+    frac_in_file = df.groupby("source_file", observed=True)["row_in_file"].rank(pct=True, method="first")
+    is_head = frac_in_file <= frac
+    return df[is_head].reset_index(drop=True), df[~is_head].reset_index(drop=True)
 
 
 def class_counts(splits: dict[str, pd.DataFrame], col: str) -> pd.DataFrame:

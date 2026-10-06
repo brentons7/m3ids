@@ -1,12 +1,8 @@
-# Install PyTorch first, built for your GPU (CUDA or ROCm): https://pytorch.org/get-started/locally/
 torch
 numpy
 pandas
 pyarrow
 scikit-learn
 matplotlib
-
-# Mamba-2 and Mamba-3 come from mamba-ssm, built from source (Mamba-3 isn't on PyPI yet).
-# It compiles against the installed torch, so install it separately after the above:
-#   pip install --no-build-isolation "mamba-ssm @ git+https://github.com/state-spaces/mamba.git@e9594ce1c732d97440f0332fdc43170a2294dbfa"
-# On AMD/ROCm, Mamba-3 also needs a local kernel patch (see README).
+mamba-ssm @ git+https://github.com/state-spaces/mamba.git@e9594ce1c732d97440f0332fdc43170a2294dbfa
+apache-tvm-ffi==0.1.8.post2  # newer versions break the TileLang kernels Mamba-3 MIMO uses

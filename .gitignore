@@ -4,8 +4,9 @@ results/*
 !.gitkeep
 # Figures are the one part of results/ that goes in git: PNGs only, no CSVs or run data
 !results/figures/
-results/figures/*/*
-!results/figures/*/*.png
+results/figures/**
+!results/figures/**/
+!results/figures/**/*.png
 
 __pycache__/
 *.pyc
@@ -19,3 +20,6 @@ scripts/check_mamba3.py
 
 # Personal notes and journal, kept local
 docs/
+
+# Queue run logs
+logs/

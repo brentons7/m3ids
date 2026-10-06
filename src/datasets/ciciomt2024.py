@@ -1,6 +1,14 @@
 """CICIoMT2024 (https://www.unb.ca/cic/datasets/iomt-dataset-2024.html), WiFi_and_MQTT attacks.
 
-Expects data/raw/CICIoMT2024/csv/{train,test}/*.csv. Labels come from filenames; the published train/test split is kept.
+Expects the download's own layout: data/raw/CICIoMT2024/WiFI_and_MQTT/attacks/csv/{train,test}/*.csv.
+Only that folder is used; the rest of the download (Bluetooth/, profiling/, pcap/) can be deleted.
+Labels come from filenames; the published train/test split is kept.
+
+Val is the first VAL_FRAC_OF_TEST (in time) of each *test* recording, and test is the rest; every
+train recording is used for training. Val taken from the tail of the train recordings scored ~1.0 for
+every model and did not predict test results, because the test files are separate recordings. The
+union val + test is the full published test set, which experiment.py also scores ("full_test") for
+comparison with other papers.
 """
 import re
 from pathlib import Path
@@ -11,6 +19,13 @@ import pandas as pd
 from . import common
 
 RAW_DIRNAME = "CICIoMT2024"
+CSV_SUBDIR = Path("WiFI_and_MQTT") / "attacks" / "csv"
+
+# IAT holds capture-session-sized values (~8.47e7 in every DoS/DDoS/MQTT flood file, ~1.69e8 or near 0 in
+# benign/recon/spoofing), so it identifies the recording rather than the traffic's behavior.
+DROPPED = ["iat"]
+
+VAL_FRAC_OF_TEST = 0.3  # 0.2 was too little: the benign test recording drifts over time
 
 # Attack-name prefix -> category (the dataset paper's 5 attack categories, plus Benign).
 CATEGORY_PREFIXES = {
@@ -65,27 +80,30 @@ def load_split(csv_dir: Path) -> pd.DataFrame:
 
 
 def prepare(raw_dir: Path, out_dir: Path, val_frac: float) -> None:
-    print(f"Loading train CSVs from {raw_dir / 'csv/train'}")
-    train = load_split(raw_dir / "csv" / "train")
-    print(f"Loading test CSVs from {raw_dir / 'csv/test'}")
-    test = load_split(raw_dir / "csv" / "test")
+    csv_dir = raw_dir / CSV_SUBDIR
+    print(f"Loading train CSVs from {csv_dir / 'train'}")
+    train = load_split(csv_dir / "train")
+    print(f"Loading test CSVs from {csv_dir / 'test'}")
+    test = load_split(csv_dir / "test")
 
-    features = [c for c in train.columns if c not in common.META_COLUMNS]
+    features = [c for c in train.columns if c not in common.META_COLUMNS + DROPPED]
     assert list(test.columns) == list(train.columns), "train and test CSVs have different columns"
 
     train, train_clean = common.clean(train, features)
     test, test_clean = common.clean(test, features)
 
-    # Dedupe train only; test stays as published so results compare with other papers.
-    train, train_dups = common.drop_duplicates(train, features)
+    # Duplicates are counted, not dropped (as in the other datasets): removing them would leave gaps in the
+    # time order the sequence models read. Test rows stay as published so results compare with other papers.
+    train, train_dups = common.drop_duplicates(train, features, drop=False)
     test_rows_also_in_train = common.count_overlap(test, train, features)
 
-    train, val = common.split_val(train, val_frac)
+    val, test = common.split_head(test, VAL_FRAC_OF_TEST)  # val_frac (train-tail val) is not used here
 
     info = {
         "dataset": "CICIoMT2024 (WiFi_and_MQTT attacks, CSV features)",
         "source": "https://www.unb.ca/cic/datasets/iomt-dataset-2024.html",
-        "val_frac": val_frac,
+        "val_from_test": VAL_FRAC_OF_TEST,
+        "dropped_columns": DROPPED,
         "cleaning": {
             "train": {**train_clean, **train_dups},
             "test": {**test_clean, "rows_with_features_also_in_train": test_rows_also_in_train},

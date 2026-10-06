@@ -10,12 +10,17 @@ class Mamba3Detector(SequenceDetector):
         "d_state": 64,
         "headdim": 32,
         "expand": 2,
+        "is_mimo": False,  # multi-input multi-output SSM (Mamba-3 feature); needs the TileLang kernels
+        "mimo_rank": 4,    # only used when is_mimo is on
     }
 
     def build_backbone(self) -> nn.Module:
         hp = self.hp
         mixers = [
-            Mamba3(d_model=hp["d_model"], d_state=hp["d_state"], headdim=hp["headdim"], expand=hp["expand"], layer_idx=i)
+            # chunk_size: upstream recommends 64 for SISO and 64 / mimo_rank for MIMO.
+            Mamba3(d_model=hp["d_model"], d_state=hp["d_state"], headdim=hp["headdim"], expand=hp["expand"], layer_idx=i,
+                   is_mimo=hp["is_mimo"], mimo_rank=hp["mimo_rank"],
+                   chunk_size=64 // hp["mimo_rank"] if hp["is_mimo"] else 64)
             for i in range(hp["n_layers"])
         ]
         return ResidualStack(mixers, hp["d_model"], hp["dropout"])

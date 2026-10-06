@@ -16,8 +16,10 @@ class Mamba2Detector(SequenceDetector):
         hp = self.hp
         mixers = [
             # use_mem_eff_path=False: fused path needs causal-conv1d.
+            # chunk_size=seq_len: the default (256) pads every 32-row window to 256, which wastes
+            # memory (the scan builds a batch x chunk x chunk matrix) and OOMs scoring on the Jetson.
             Mamba2(d_model=hp["d_model"], d_state=hp["d_state"], headdim=hp["headdim"], expand=hp["expand"],
-                   layer_idx=i, use_mem_eff_path=False)
+                   layer_idx=i, use_mem_eff_path=False, chunk_size=hp["seq_len"])
             for i in range(hp["n_layers"])
         ]
         return ResidualStack(mixers, hp["d_model"], hp["dropout"])

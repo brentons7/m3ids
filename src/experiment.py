@@ -11,7 +11,7 @@ import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 
-from src import evaluate, models
+from src import evaluate, models, power
 from src.models.base import Split
 
 
@@ -36,13 +36,57 @@ def to_split(df: pd.DataFrame, features: list[str], scaler: StandardScaler) -> S
     )
 
 
+def slice_split(data: Split, lo: int, hi: int) -> Split:
+    return Split(X=data.X[lo:hi], y=data.y[lo:hi], attack=data.attack[lo:hi],
+                 stream=data.stream[lo:hi], position=data.position[lo:hi])
+
+
+def warm_up(model, data: Split, batch_sizes=(1, 32)) -> None:
+    """A few untimed calls per batch size. Covers first-call CUDA setup and per-shape kernel compiles
+    (Mamba-3 MIMO's TileLang kernels take ~30 s each), so they stay out of the timed and power window."""
+    for bs in batch_sizes:
+        for _ in range(5):
+            model.score(slice_split(data, 0, bs))
+
+
+def benchmark_latency(model, data: Split, batch_sizes=(1, 32), min_seconds: float = 1.0) -> dict:
+    """Per-call latency at each batch size, through the model's public score() API -- works the
+    same way for every Detector, sequence-based or not. batch=1 is the single-flow streaming case
+    (one row in, one verdict out); batch=32 is a small burst. Each call rebuilds its own windows
+    (score()'s normal entry point), so this is end-to-end latency, not just the forward pass.
+    """
+    n = len(data.y)
+    out = {}
+    for bs in batch_sizes:
+        if n < bs:
+            continue
+        times, i, t_start = [], 0, time.time()
+        while time.time() - t_start < min_seconds or len(times) < 20:
+            lo = i % (n - bs + 1)
+            t0 = time.time()
+            model.score(slice_split(data, lo, lo + bs))
+            times.append(time.time() - t0)
+            i += bs
+        us = np.array(times) * 1e6
+        out[f"batch{bs}"] = {
+            "p50_us": round(float(np.percentile(us, 50)), 1),
+            "p95_us": round(float(np.percentile(us, 95)), 1),
+            "p99_us": round(float(np.percentile(us, 99)), 1),
+            "mean_us": round(float(us.mean()), 1),
+            "throughput_rows_per_s": round(float(bs / (us.mean() / 1e6)), 1),
+            "n_calls": len(times),
+        }
+    return out
+
+
 def run_experiment(
     dataset: str, model_name: str, hparams: dict, seed: int, device: str, tag: str,
     processed_dir: Path, results_dir: Path,
 ) -> dict:
     set_seed(seed)
     data_dir = processed_dir / dataset
-    features = json.loads((data_dir / "meta.json").read_text())["features"]
+    meta = json.loads((data_dir / "meta.json").read_text())
+    features = meta["features"]
     frames = {name: pd.read_parquet(data_dir / f"{name}.parquet") for name in ["train", "val", "test"]}
 
     Model = models.get(model_name)
@@ -66,9 +110,24 @@ def run_experiment(
     infer_us_per_row = (time.time() - t0) / len(test_scores) * 1e6
 
     metrics = evaluate.evaluate(val_scores, splits["val"].y, test_scores, splits["test"].y, splits["test"].attack)
+    if meta.get("val_from_test"):
+        # val + test together are the full published test set: score it too, for comparison with other papers.
+        metrics["full_test"] = evaluate.standard_metrics(
+            np.concatenate([val_scores, test_scores]), np.concatenate([splits["val"].y, splits["test"].y]),
+            metrics["threshold"])
     metrics["n_params"] = model.n_params()
     metrics["train_seconds"] = round(train_seconds, 1)
     metrics["infer_us_per_row"] = round(infer_us_per_row, 3)
+    # Edge-device metrics: latency percentiles at a couple of realistic batch sizes, with
+    # sustained power draw sampled over that same (guaranteed multi-second) window -- tied to
+    # the benchmark rather than the test-set scoring above so it doesn't depend on dataset size.
+    # power is None off-device (no tegrastats) or if the run was somehow still too short.
+    warm_up(model, splits["test"])
+    with power.PowerMonitor() as mon:
+        t0 = time.time()
+        latency = benchmark_latency(model, splits["test"])
+        bench_seconds = time.time() - t0
+    metrics["edge"] = {"power": mon.summary(bench_seconds), "latency": latency}
 
     # Save everything needed to trace a number in the paper back to exactly how it was produced.
     run_id = f"{datetime.now():%Y%m%d-%H%M%S}_{dataset}_{model_name}" + (f"_{tag}" if tag else "")
@@ -87,6 +146,12 @@ def run_experiment(
         print(f"  {k:18s} {metrics[k]:.4f}")
     if metrics["n_params"] is not None:
         print(f"  {'n_params':18s} {metrics['n_params']:,}")
+    edge_power = metrics["edge"]["power"]
+    if edge_power is not None:
+        print(f"  {'power (mean/max)':18s} {edge_power['mean_power_mw']:.0f} / {edge_power['max_power_mw']:.0f} mW"
+              f"   energy {edge_power['energy_mj']:.0f} mJ   peak RAM {edge_power['peak_ram_mb']} MB   GPU temp {edge_power['mean_gpu_temp_c']} C")
+    for name, lat in metrics["edge"]["latency"].items():
+        print(f"  {'latency ' + name:18s} p50 {lat['p50_us']:.0f} us   p99 {lat['p99_us']:.0f} us   {lat['throughput_rows_per_s']:.0f} rows/s")
     print("  flagged as attack, per class:")
     for a, rate in metrics["flagged_rate_per_class"].items():
         print(f"    {a:26s} {rate:.4f}")
@@ -94,12 +159,23 @@ def run_experiment(
 
 
 SUMMARY_COLUMNS = ["run_id", "dataset", "model", "seed", "tag", "roc_auc", "pr_auc", "f1", "precision",
-                   "recall", "fpr", "balanced_accuracy", "n_params", "train_seconds", "infer_us_per_row", "hparams"]
+                   "recall", "fpr", "balanced_accuracy", "n_params", "train_seconds", "infer_us_per_row",
+                   "mean_power_mw", "max_power_mw", "energy_mj", "peak_ram_mb",
+                   "latency_b1_p50_us", "latency_b1_p99_us", "hparams", "edge_json"]
 
 
 def append_summary(path: Path, run_id: str, config: dict, metrics: dict) -> None:
     """One row per run in results/summary.csv, for comparing models at a glance."""
-    row = {"run_id": run_id, **config, **metrics, "hparams": json.dumps(config["hparams"])}
+    edge = metrics.get("edge") or {}
+    power_s = edge.get("power") or {}
+    lat_b1 = (edge.get("latency") or {}).get("batch1") or {}
+    flat_edge = {
+        "mean_power_mw": power_s.get("mean_power_mw"), "max_power_mw": power_s.get("max_power_mw"),
+        "energy_mj": power_s.get("energy_mj"), "peak_ram_mb": power_s.get("peak_ram_mb"),
+        "latency_b1_p50_us": lat_b1.get("p50_us"), "latency_b1_p99_us": lat_b1.get("p99_us"),
+    }
+    row = {"run_id": run_id, **config, **metrics, **flat_edge,
+           "hparams": json.dumps(config["hparams"]), "edge_json": json.dumps(edge)}
     if path.exists():
         with path.open(newline="") as f:
             reader = csv.DictReader(f)
