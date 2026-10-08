@@ -1,1 +1,1 @@
-"""m3ids: anomaly detection on medical IoT network traffic."""
+"""m3ids: intrusion detection on medical IoT network traffic."""

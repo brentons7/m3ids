@@ -1,27 +1,27 @@
 # m3ids
 
-Mamba-3 intrusion detection for the Internet of Medical Things (IoMT), benchmarked against Mamba-2 and a Transformer on an NVIDIA Jetson. EagleCyberNest, Fall 2026.
+Mamba-3 intrusion detection for the Internet of Medical Things (IoMT), benchmarked against Mamba-2 and a Transformer on CICIoMT2024, with inference cost measured on an NVIDIA Jetson Orin Nano. EagleCyberNest, Fall 2026.
 
 ## Repository structure
 
 ```
 m3ids/
-├── run.py                  # entry point: list, prepare, experiment
+├── run.py                  # the one entry point: prepare, train, test, experiment, benchmark
 ├── requirements.txt
 ├── data/
-│   ├── raw/                # downloaded datasets go here (not in git)
-│   └── processed/          # output of `run.py prepare` (not in git)
-├── results/                # one folder per experiment run, plus summary.csv (not in git)
-│   └── figures/            # plots from scripts/plot_results.py
-├── scripts/
-│   ├── plot_results.py     # figures and summary tables for a group of runs
-│   └── run_all.sh
+│   ├── raw/                # the CICIoMT2024 CSVs go here (not in git)
+│   └── processed/          # output of `--task prepare` (not in git)
+├── results/                # one folder per run (not in git)
+│   └── figures/            # figures for the paper (PNGs in git)
 └── src/
-    ├── datasets/           # one loader per dataset, plus common.py (shared cleaning and splitting)
-    ├── models/             # mamba3.py, mamba2.py, transformer.py; sequence.py (shared training code)
-    ├── experiment.py       # train, score, evaluate, save one run
-    ├── evaluate.py         # metrics
-    └── power.py            # Jetson power, GPU and temperature sampling (tegrastats)
+    ├── datasets/           # ciciomt2024.py (loading, labels, split) and common.py (cleaning helpers)
+    ├── models/             # mamba3.py, mamba2.py, transformer.py; sequence.py (shared windowing and training)
+    ├── train.py            # train one model and save it to results/<run>/
+    ├── test.py             # score a saved run on val + test, write its metrics
+    ├── evaluate.py         # alarm threshold (picked on val) and metrics
+    ├── experiment.py       # train, then test, for each seed
+    ├── benchmark.py        # latency, throughput, GPU memory and power on the Jetson
+    └── plotting/           # results.py, ablation.py, hardware.py
 ```
 
 ## Setup
@@ -35,50 +35,93 @@ pip install torch            # pick the build for your GPU: https://pytorch.org/
 pip install --no-build-isolation -r requirements.txt
 ```
 
-## Datasets
+Mamba-3 with MIMO uses TileLang kernels, which need an NVIDIA GPU.
 
-| Name (`--dataset`) | Dataset | Level | Put in `data/raw/` |
-|---|---|---|---|
-| `ciciomt2024` | [CICIoMT2024](https://www.unb.ca/cic/datasets/iomt-dataset-2024.html) | Feature windows | `CICIoMT2024/WiFI_and_MQTT/attacks/csv/{train,test}/` |
-| `xiomt` | [X-IoMT](https://github.com/RuiPintoUBI/X-IoMTDataset) v1.1 | Packets | `X-IoMTDataset/OriginalDatasetUpdated/` |
-| `iomttrafficdata` | IoMT-TrafficData <!-- TODO: add source link --> | Flows | `IoMT-TrafficData/output.csv` |
+## Data
 
-Only the folders listed are used; the rest of each download can be deleted. Each loader's docstring in `src/datasets/` explains its labels, dropped columns and train/test split.
-
-Prepare each dataset once (writes `data/processed/<name>/`):
+[CICIoMT2024](https://www.unb.ca/cic/datasets/iomt-dataset-2024.html), WiFi and MQTT attacks. The full download is about 60 GB, but only one folder is used: copy `WiFI_and_MQTT/attacks/csv/` from it to `data/raw/CICIoMT2024/csv/`, so the CSVs sit at `data/raw/CICIoMT2024/csv/{train,test}/`. Then prepare it once (writes `data/processed/ciciomt2024/`):
 
 ```bash
-python3 run.py prepare --dataset ciciomt2024
-python3 run.py prepare --dataset xiomt
-python3 run.py prepare --dataset iomttrafficdata
+python3 run.py --task prepare
 ```
+
+Labels come from the file names, and the task is binary (benign vs. attack). The published train set is used for training. Validation is the first 30% (in time) of each published test recording, and test is the remaining 70%. `src/datasets/ciciomt2024.py` explains why, and which column is dropped.
 
 ## Models
 
-| Name (`--model`) | Model |
-|---|---|
-| `mamba3` | Mamba-3 |
-| `mamba2` | Mamba-2 |
-| `transformer` | Transformer encoder |
+| `--model` | Model | Parameters |
+|---|---|---|
+| `transformer` | Causal Transformer encoder | 72,001 |
+| `mamba2` | Mamba-2 | 72,025 |
+| `mamba3` with `--is-mimo true --mimo-rank 2 --d-state 32` | Mamba-3 (MIMO) | 73,937 |
+| `mamba3` | Mamba-3 without MIMO (SISO), for the ablation | 73,553 |
 
-All three read a window of consecutive rows (32 by default) and predict whether the last row is an attack.
+All of them read a window of the last 32 rows of the same recording and predict whether the last row is an attack. Only the middle layers differ. In the results and figures, "Mamba-3" means the MIMO model.
 
-## Running experiments
-
-One model on one dataset:
-
-```bash
-python3 run.py experiment --dataset xiomt --model mamba3 --seed 1 --tag baseline
-```
-
-Any hyperparameter can be changed with a flag, for example `--seq-len 64 --epochs 5`. `python3 run.py list` shows every dataset, model and hyperparameter with its default.
-
-Each run is saved to `results/<time>_<dataset>_<model>_<tag>/` (config, metrics, scores, model weights) and added as a row to `results/summary.csv`. Metrics include ROC-AUC, F1, false-alarm rate and per-attack detection rates; on a Jetson they also include power draw, latency and GPU use.
-
-To plot all runs with a given tag:
+## Running
 
 ```bash
-python3 scripts/plot_results.py --tag baseline
+python3 run.py --task list                                                  # models and every hyperparameter
+python3 run.py --task experiment --model mamba2 --seeds 1 2 3 --tag mytag   # train + test, one run per seed
+python3 run.py --task train --model mamba2 --seeds 1 --tag mytag            # train and save only
+python3 run.py --task test --tag mytag                                      # (re-)test saved runs
+python3 run.py --task benchmark --tag mytag                                 # inference cost (on the Jetson)
 ```
 
-Figures and tables are written to `results/figures/<tag>/<dataset>/`.
+Any hyperparameter can be changed with a flag, for example `--lr 3e-3 --seq-len 64`. Each run is saved to `results/<time>_ciciomt2024_<model>_<tag>/`, which holds `config.json`, `model.pt`, `metrics.json`, the scores, and `benchmark.json` once benchmarked.
+
+Figures are made from the runs with a given tag and written to `results/figures/<name>/`:
+
+```bash
+python3 -m src.plotting.results --tags mytag                     # Transformer, Mamba-2, Mamba-3 (MIMO)
+python3 -m src.plotting.ablation --tags mytag --name my_ablation  # Mamba-3 SISO vs. MIMO
+python3 -m src.plotting.hardware --tags mytag                    # Jetson cost, from benchmark.json
+```
+
+## Reproducing the paper
+
+```bash
+# Untuned: every setting at its default
+python3 run.py --task experiment --model transformer --seeds 1 2 3 --tag untuned
+python3 run.py --task experiment --model mamba2 --seeds 1 2 3 --tag untuned
+python3 run.py --task experiment --model mamba3 --is-mimo true --mimo-rank 2 --d-state 32 --seeds 1 2 3 --tag untuned
+python3 run.py --task experiment --model mamba3 --seeds 1 2 3 --tag untuned
+
+# Tuned (learning rate per model, picked on validation), plus the SISO ablation with Mamba-3's settings
+python3 run.py --task experiment --model transformer --seeds 1 2 3 --tag final --lr 1e-3 --train-frac 0.3
+python3 run.py --task experiment --model mamba2 --seeds 1 2 3 --tag final --lr 3e-3 --train-frac 0.3
+python3 run.py --task experiment --model mamba3 --is-mimo true --mimo-rank 2 --d-state 32 --seeds 1 2 3 --tag final --lr 3e-4 --train-frac 0.3
+python3 run.py --task experiment --model mamba3 --seeds 1 2 3 --tag ablation_siso --lr 3e-4 --train-frac 0.3
+
+# Inference cost, on the Jetson
+python3 run.py --task benchmark --tag final ablation_siso
+
+# Figures
+python3 -m src.plotting.results --tags untuned
+python3 -m src.plotting.results --tags final
+python3 -m src.plotting.hardware --tags final
+python3 -m src.plotting.ablation --tags untuned --name ablation_untuned
+python3 -m src.plotting.ablation --tags final ablation_siso --name ablation_tuned
+```
+
+`--train-frac 0.3` trains on a fresh random 30% of the training windows each epoch, the same budget the tuning used.
+
+## Results
+
+Tuned models, mean of 3 seeds. False alarms, missed attacks and balanced accuracy are on the held-out 70% test split. The other columns are on the full published test set, so they can be compared with other papers.
+
+| Model | False alarms | Missed attacks | Balanced acc. | Accuracy | Precision | Recall | F1 | ROC-AUC |
+|---|---|---|---|---|---|---|---|---|
+| Transformer | 0.37 ± 0.12% | 0.098% | 0.9977 | 0.9991 | 0.9999 | 0.9992 | 0.9995 | 0.99992 |
+| Mamba-2 | 0.52 ± 0.07% | 0.104% | 0.9969 | 0.9990 | 0.9999 | 0.9991 | 0.9995 | 0.99992 |
+| Mamba-3 | 0.78 ± 0.39% | 0.069% | 0.9958 | 0.9992 | 0.9998 | 0.9994 | 0.9996 | 0.99995 |
+
+Inference on the Jetson Orin Nano (MAXN_SUPER, clocks locked), mean of 3 seeds:
+
+| Model | Latency, 1 window | Throughput, batch 512 | GPU memory, batch 512 | Board power, batch 512 |
+|---|---|---|---|---|
+| Transformer | 4.01 ms | 54k windows/s | 37.3 MB | 15.0 W |
+| Mamba-2 | 6.88 ms | 36k windows/s | 83.9 MB | 15.3 W |
+| Mamba-3 | 6.85 ms | 57k windows/s | 61.8 MB | 15.1 W |
+
+Mamba-3 with MIMO was trained on the Jetson, because its kernels need an NVIDIA GPU. The Transformer and Mamba-2 were trained on an AMD workstation GPU. All inference numbers come from the Jetson. Figures for all of the above are in `results/figures/`.

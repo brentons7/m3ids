@@ -1,4 +1,6 @@
-"""Shared windowing, training and scoring; each model only implements build_backbone()."""
+"""Shared windowing, training and scoring; each model only implements build_backbone().
+Keys in a model's default_hparams become run.py train flags (--seq-len, --lr, ...)."""
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -7,7 +9,16 @@ import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import roc_auc_score
 
-from .base import Detector, Split
+
+
+@dataclass
+class Split:
+    """One split (train/val/test), already scaled and ready for a model."""
+    X: np.ndarray         # (n_rows, n_features) float32
+    y: np.ndarray         # (n_rows,) 0 = benign, 1 = attack
+    attack: np.ndarray    # (n_rows,) attack name, for per-attack reporting
+    stream: np.ndarray    # (n_rows,) id of the capture the row came from
+    position: np.ndarray  # (n_rows,) row's position within its capture (time order)
 
 
 class Windows:
@@ -61,8 +72,7 @@ class SequenceClassifier(nn.Module):
         return self.head(self.final_norm(h[:, -1])).squeeze(-1)  # predict for the last row
 
 
-class SequenceDetector(Detector):
-    supervised = True
+class SequenceDetector:
     default_hparams = {
         "seq_len": 32,       # rows of history per prediction
         "d_model": 64,
@@ -80,8 +90,10 @@ class SequenceDetector(Detector):
         """Return a module mapping (batch, seq_len, d_model) -> (batch, seq_len, d_model)."""
         raise NotImplementedError
 
-    def __init__(self, n_features, device, **hparams):
-        super().__init__(n_features, device, **hparams)
+    def __init__(self, n_features: int, device: str, **hparams):
+        self.n_features = n_features
+        self.device = device
+        self.hp = {**self.default_hparams, **hparams}
         self.net = SequenceClassifier(n_features, self.hp["d_model"], self.build_backbone).to(device)
         self.autocast = dict(device_type="cuda", dtype=torch.bfloat16, enabled=device.startswith("cuda"))
 
@@ -119,6 +131,7 @@ class SequenceDetector(Detector):
 
     @torch.no_grad()
     def score(self, data: Split) -> np.ndarray:
+        """One score per row in [0, 1], in the split's row order; higher = more likely an attack."""
         self.net.eval()
         windows = Windows(data, self.hp["seq_len"], self.device)
         out = torch.empty(windows.n, device=self.device)
@@ -133,3 +146,7 @@ class SequenceDetector(Detector):
 
     def save(self, path: Path) -> None:
         torch.save({"state_dict": self.net.state_dict(), "hparams": self.hp}, path / "model.pt")
+
+    def load(self, path: Path) -> None:
+        self.net.load_state_dict(torch.load(path / "model.pt", map_location=self.device)["state_dict"])
+        self.net.eval()

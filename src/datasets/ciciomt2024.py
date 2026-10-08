@@ -1,13 +1,13 @@
 """CICIoMT2024 (https://www.unb.ca/cic/datasets/iomt-dataset-2024.html), WiFi_and_MQTT attacks.
 
-Expects the download's own layout: data/raw/CICIoMT2024/WiFI_and_MQTT/attacks/csv/{train,test}/*.csv.
-Only that folder is used; the rest of the download (Bluetooth/, profiling/, pcap/) can be deleted.
+Only one folder of the ~60 GB download is needed: copy WiFI_and_MQTT/attacks/csv/ from it to
+data/raw/CICIoMT2024/csv/, so the CSVs sit at data/raw/CICIoMT2024/csv/{train,test}/*.csv.
 Labels come from filenames; the published train/test split is kept.
 
 Val is the first VAL_FRAC_OF_TEST (in time) of each *test* recording, and test is the rest; every
 train recording is used for training. Val taken from the tail of the train recordings scored ~1.0 for
 every model and did not predict test results, because the test files are separate recordings. The
-union val + test is the full published test set, which experiment.py also scores ("full_test") for
+union val + test is the full published test set, which src/test.py also scores ("full_test") for
 comparison with other papers.
 """
 import re
@@ -19,7 +19,7 @@ import pandas as pd
 from . import common
 
 RAW_DIRNAME = "CICIoMT2024"
-CSV_SUBDIR = Path("WiFI_and_MQTT") / "attacks" / "csv"
+CSV_SUBDIR = Path("csv")   # the download's WiFI_and_MQTT/attacks/csv/
 
 # IAT holds capture-session-sized values (~8.47e7 in every DoS/DDoS/MQTT flood file, ~1.69e8 or near 0 in
 # benign/recon/spoofing), so it identifies the recording rather than the traffic's behavior.
@@ -79,7 +79,7 @@ def load_split(csv_dir: Path) -> pd.DataFrame:
     return df
 
 
-def prepare(raw_dir: Path, out_dir: Path, val_frac: float) -> None:
+def prepare(raw_dir: Path, out_dir: Path) -> None:
     csv_dir = raw_dir / CSV_SUBDIR
     print(f"Loading train CSVs from {csv_dir / 'train'}")
     train = load_split(csv_dir / "train")
@@ -92,12 +92,12 @@ def prepare(raw_dir: Path, out_dir: Path, val_frac: float) -> None:
     train, train_clean = common.clean(train, features)
     test, test_clean = common.clean(test, features)
 
-    # Duplicates are counted, not dropped (as in the other datasets): removing them would leave gaps in the
+    # Duplicates are counted, not dropped: removing them would leave gaps in the
     # time order the sequence models read. Test rows stay as published so results compare with other papers.
     train, train_dups = common.drop_duplicates(train, features, drop=False)
     test_rows_also_in_train = common.count_overlap(test, train, features)
 
-    val, test = common.split_head(test, VAL_FRAC_OF_TEST)  # val_frac (train-tail val) is not used here
+    val, test = common.split_head(test, VAL_FRAC_OF_TEST)
 
     info = {
         "dataset": "CICIoMT2024 (WiFi_and_MQTT attacks, CSV features)",

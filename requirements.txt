@@ -1,3 +1,5 @@
+# Tested with Python 3.13, torch 2.14, numpy 2.5, pandas 3.0, pyarrow 25, scikit-learn 1.9, matplotlib 3.11.
+# Install torch first, the build for your GPU (CUDA on the Jetson / NVIDIA, ROCm on AMD): https://pytorch.org
 torch
 numpy
 pandas
@@ -5,4 +7,6 @@ pyarrow
 scikit-learn
 matplotlib
 mamba-ssm @ git+https://github.com/state-spaces/mamba.git@e9594ce1c732d97440f0332fdc43170a2294dbfa
-apache-tvm-ffi==0.1.8.post2  # newer versions break the TileLang kernels Mamba-3 MIMO uses
+# Mamba-3 MIMO's kernels are TileLang; newer releases of these two break them.
+tilelang==0.1.8
+apache-tvm-ffi==0.1.8.post2

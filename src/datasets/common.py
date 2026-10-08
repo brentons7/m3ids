@@ -1,4 +1,4 @@
-"""Preprocessing shared by all datasets. Output: data/processed/<dataset>/{train,val,test}.parquet + meta.json."""
+"""Preprocessing helpers for the dataset loaders. Output: data/processed/<dataset>/{train,val,test}.parquet + meta.json."""
 import json
 from datetime import datetime
 from pathlib import Path
@@ -50,13 +50,6 @@ def drop_duplicates(df: pd.DataFrame, features: list[str], drop: bool = True) ->
 def count_overlap(df: pd.DataFrame, reference: pd.DataFrame, features: list[str]) -> int:
     """How many rows of df have a feature vector that also appears in reference."""
     return int(row_hashes(df, features).isin(set(row_hashes(reference, features))).sum())
-
-
-def split_val(df: pd.DataFrame, val_frac: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Val = the last val_frac (in time) of each capture, so val windows don't overlap train windows."""
-    frac_in_file = df.groupby("source_file", observed=True)["row_in_file"].rank(pct=True, method="first")
-    is_val = frac_in_file > 1 - val_frac
-    return df[~is_val].reset_index(drop=True), df[is_val].reset_index(drop=True)
 
 
 def split_head(df: pd.DataFrame, frac: float) -> tuple[pd.DataFrame, pd.DataFrame]:
