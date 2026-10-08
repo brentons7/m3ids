@@ -1,6 +1,6 @@
 # m3ids
 
-Mamba-3 intrusion detection for the Internet of Medical Things (IoMT), benchmarked against Mamba-2 and a Transformer on CICIoMT2024, with inference cost measured on an NVIDIA Jetson Orin Nano. EagleCyberNest, Fall 2026.
+Mamba-3 intrusion detection for the Internet of Medical Things (IoMT), benchmarked against Mamba-2 and a Transformer on CICIoMT2024, with inference cost measured on an NVIDIA Jetson Orin Nano.
 
 ## Repository structure
 
@@ -12,7 +12,7 @@ m3ids/
 │   ├── raw/                # the CICIoMT2024 CSVs go here (not in git)
 │   └── processed/          # output of `--task prepare` (not in git)
 ├── results/                # one folder per run (not in git)
-│   └── figures/            # figures for the paper (PNGs in git)
+│   └── figures/            # figures (PNGs in git)
 └── src/
     ├── datasets/           # ciciomt2024.py (loading, labels, split) and common.py (cleaning helpers)
     ├── models/             # mamba3.py, mamba2.py, transformer.py; sequence.py (shared windowing and training)
@@ -78,37 +78,9 @@ python3 -m src.plotting.ablation --tags mytag --name my_ablation  # Mamba-3 SISO
 python3 -m src.plotting.hardware --tags mytag                    # Jetson cost, from benchmark.json
 ```
 
-## Reproducing the paper
-
-```bash
-# Untuned: every setting at its default
-python3 run.py --task experiment --model transformer --seeds 1 2 3 --tag untuned
-python3 run.py --task experiment --model mamba2 --seeds 1 2 3 --tag untuned
-python3 run.py --task experiment --model mamba3 --is-mimo true --mimo-rank 2 --d-state 32 --seeds 1 2 3 --tag untuned
-python3 run.py --task experiment --model mamba3 --seeds 1 2 3 --tag untuned
-
-# Tuned (learning rate per model, picked on validation), plus the SISO ablation with Mamba-3's settings
-python3 run.py --task experiment --model transformer --seeds 1 2 3 --tag final --lr 1e-3 --train-frac 0.3
-python3 run.py --task experiment --model mamba2 --seeds 1 2 3 --tag final --lr 3e-3 --train-frac 0.3
-python3 run.py --task experiment --model mamba3 --is-mimo true --mimo-rank 2 --d-state 32 --seeds 1 2 3 --tag final --lr 3e-4 --train-frac 0.3
-python3 run.py --task experiment --model mamba3 --seeds 1 2 3 --tag ablation_siso --lr 3e-4 --train-frac 0.3
-
-# Inference cost, on the Jetson
-python3 run.py --task benchmark --tag final ablation_siso
-
-# Figures
-python3 -m src.plotting.results --tags untuned
-python3 -m src.plotting.results --tags final
-python3 -m src.plotting.hardware --tags final
-python3 -m src.plotting.ablation --tags untuned --name ablation_untuned
-python3 -m src.plotting.ablation --tags final ablation_siso --name ablation_tuned
-```
-
-`--train-frac 0.3` trains on a fresh random 30% of the training windows each epoch, the same budget the tuning used.
-
 ## Results
 
-Tuned models, mean of 3 seeds. False alarms, missed attacks and balanced accuracy are on the held-out 70% test split. The other columns are on the full published test set, so they can be compared with other papers.
+Tuned models (`--lr` 1e-3 Transformer, 3e-3 Mamba-2, 3e-4 Mamba-3; all with `--train-frac 0.3`), mean of 3 seeds. False alarms, missed attacks and balanced accuracy are on the held-out 70% test split. The other columns are on the full published test set, so they can be compared with other papers.
 
 | Model | False alarms | Missed attacks | Balanced acc. | Accuracy | Precision | Recall | F1 | ROC-AUC |
 |---|---|---|---|---|---|---|---|---|
